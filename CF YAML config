@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for EC2 with security groups, IAM roles, and services like EKS, S3, and Route 53.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    Description: EC2 instance type
+
+Resources:
+
+  # VPC and Subnet setup
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+  
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: 'us-east-1a'
+      MapPublicIpOnLaunch: true
+
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: {}
+
+  AttachGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  RouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  
+  Route:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  # EC2 instance setup (Windows)
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: 'ami-0c55b159cbfafe1f0'  # Windows Server 2019 AMI (replace with the correct AMI ID for your region)
+      SubnetId: !Ref PublicSubnet
+      KeyName: 'your-key-pair-name'  # replace with your actual key pair
+      SecurityGroupIds:
+        - !Ref WebSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceRole
+
+  # EC2 Instance Security Group (allow only HTTP and HTTPS)
+  WebSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Allow HTTP and HTTPS traffic only'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: '0.0.0.0/0'
+
+  # IAM Roles for EC2, Admin, Auth User, SO, and Audit User
+  EC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+      Policies:
+        - PolicyName: 'EC2InstancePolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:StartInstances'
+                  - 'ec2:StopInstances'
+                Resource: '*'
+
+  AdminRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'iam.amazonaws.com'
+      Policies:
+        - PolicyName: 'AdminPermissions'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'ec2:*'
+                  - 'iam:*'
+                  - 's3:*'
+                  - 'cloudformation:*'
+                  - 'logs:*'
+                  - 'route53:*'
+                  - 'eks:*'
+                  - 'shield:*'
+                  - 'acm:*'
+                  - 'codedeploy:*'
+                  - 'codepipeline:*'
+                Resource: '*'
+
+  AuthUserRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'iam.amazonaws.com'
+      Policies:
+        - PolicyName: 'AuthUserPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'ec2:DescribeInstances'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource: '*'
+
+  SOAuditRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'iam.amazonaws.com'
+      Policies:
+        - PolicyName: 'ReadOnlyPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 's3:ListBucket'
+                Resource: '*'
+              - Effect: 'Allow'
+                Action: 's3:GetObject'
+                Resource: '*'
+              - Effect: 'Allow'
+                Action: 'ec2:DescribeInstances'
+                Resource: '*'
+
+  # S3 Buckets
+  CFConfigBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: 'cf-config-backup-bucket'
+
+  WebDataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: 'webdata-bucket'
+
+  AppDataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: 'appdata-bucket'
+
+  # CloudWatch Logs for User Access Logging
+  CloudWatchLogs:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: '/aws/user-access-logs'
+      RetentionInDays: 30
+
+  # AWS Shield Standard
+  ShieldProtection:
+    Type: 'AWS::Shield::Protection'
+    Properties:
+      ResourceArn: !GetAtt EC2Instance.Arn
+
+  # AWS Certificate Manager
+  ACMCertificate:
+    Type: 'AWS::ACM::Certificate'
+    Properties:
+      DomainName: 'example.com'  # replace with actual domain name
+      ValidationMethod: 'DNS'
+
+  # Amazon Route 53 DNS Configuration
+  Route53Zone:
+    Type: 'AWS::Route53::HostedZone'
+    Properties:
+      Name: 'example.com'  # replace with actual domain name
+
+  # Amazon EKS setup (simplified for example)
+  EKSCluster:
+    Type: 'AWS::EKS::Cluster'
+    Properties:
+      Name: 'my-cluster'
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnet
+
+  # EKS Cluster Role
+  EKSClusterRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'eks.amazonaws.com'
+      Policies:
+        - PolicyName: 'EKSClusterPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'ec2:DescribeSubnets'
+                  - 'eks:DescribeCluster'
+                Resource: '*'
+
+Outputs:
+  EC2InstanceID:
+    Description: 'EC2 Instance ID'
+    Value: !Ref EC2Instance
+  VPCId:
+    Description: 'VPC ID'
+    Value: !Ref VPC
+  WebDataBucketName:
+    Description: 'Web Data Bucket Name'
+    Value: !Ref WebDataBucket
