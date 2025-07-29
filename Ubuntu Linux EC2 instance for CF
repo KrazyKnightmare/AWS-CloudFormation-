@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for Ubuntu EC2 instance with security groups, IAM roles, and services like EKS, S3, and Route 53.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    Description: EC2 instance type
+
+Resources:
+
+  # VPC and Subnet setup
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+  
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: 'us-east-1a'
+      MapPublicIpOnLaunch: true
+
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: {}
+
+  AttachGateway:
+    Type: 'AWS::EC2::VPCG
